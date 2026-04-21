@@ -69,7 +69,7 @@ fi
 # Release tracking — verificações novas.
 # -----------------------------------------------------------------------------
 
-# Repositório git é obrigatório (release tracking embute commit no manifest).
+# Repositório git — se não existir, build.sh inicializa automaticamente (warn, não fail).
 if git rev-parse --git-dir >/dev/null 2>&1; then
   echo "  [ok]   projeto é repositório git"
 
@@ -85,8 +85,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
     echo "  [warn] sem remote 'origin' configurado — 'gh release create' indisponível"
   fi
 else
-  echo "  [FAIL] projeto não é repositório git — release tracking requer git init"
-  fail=$((fail+1))
+  echo "  [warn] projeto não é repositório git — build.sh inicializa automaticamente"
 fi
 
 # gh CLI é informativo (não-fatal) — habilita PR lookup + release.
