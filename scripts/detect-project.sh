@@ -65,6 +65,37 @@ else
   fail=$((fail+1))
 fi
 
+# -----------------------------------------------------------------------------
+# Release tracking — verificações novas.
+# -----------------------------------------------------------------------------
+
+# Repositório git é obrigatório (release tracking embute commit no manifest).
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "  [ok]   projeto é repositório git"
+
+  # Remote GitHub é opcional — só necessário se quiser 'gh release create'.
+  if git remote get-url origin >/dev/null 2>&1; then
+    ORIGIN_URL="$(git remote get-url origin 2>/dev/null || echo "")"
+    if echo "$ORIGIN_URL" | grep -q "github.com"; then
+      echo "  [ok]   remote origin aponta pra GitHub ($ORIGIN_URL)"
+    else
+      echo "  [warn] remote origin não é GitHub — 'gh release create' indisponível"
+    fi
+  else
+    echo "  [warn] sem remote 'origin' configurado — 'gh release create' indisponível"
+  fi
+else
+  echo "  [FAIL] projeto não é repositório git — release tracking requer git init"
+  fail=$((fail+1))
+fi
+
+# gh CLI é informativo (não-fatal) — habilita PR lookup + release.
+if command -v gh >/dev/null 2>&1; then
+  echo "  [ok]   gh CLI disponível ($(gh --version 2>/dev/null | head -n1))"
+else
+  echo "  [warn] gh CLI ausente — PR lookup e release pulados silenciosamente"
+fi
+
 echo ""
 if [ "$fail" -eq 0 ]; then
   echo "[OK] projeto Sankhya válido — pronto pra build.sh"

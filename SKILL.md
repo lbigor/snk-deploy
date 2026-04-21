@@ -27,8 +27,16 @@ A skill deve disparar quando o usuário disser coisas como:
    - Produção: pede confirmação extra ("Confirma deploy em PRODUÇÃO do cliente X?")
      antes de gerar o JAR.
 3. **Compilar e empacotar.** Rodar `scripts/build.sh` no diretório do projeto.
-   - Gera `dist/<nome>-<timestamp>.jar`.
+   - Gera `dist/<nome>-<timestamp>-<hash8>.jar`.
    - Se `javac` falhar, parar e mostrar erros. Nunca subir JAR incompleto.
+3.5. **Release tracking.** Ao compilar, a skill embute `META-INF/snk-deploy/manifest.json`
+     dentro do JAR com: branch, commit, PR associado (via `gh`), autor, timestamp, hash curto.
+     Este manifest é lido automaticamente por `snk-slack` em runtime e anexado aos logs,
+     permitindo que `snk-doctor` rastreie qualquer erro de volta ao PR que o causou.
+     Se o repo tiver permissão `gh release create`, um release é criado automaticamente
+     com o JAR como asset (opcional — controle via env `SNK_DEPLOY_CREATE_RELEASE=1` ou
+     flag `--release` no build.sh). Detalhes em
+     [docs/release-tracking.md](docs/release-tracking.md).
 4. **Exibir passo-a-passo.** Mostrar o conteúdo de
    [docs/passo-a-passo-sankhya-w.md](docs/passo-a-passo-sankhya-w.md) adaptado ao
    ambiente escolhido.
@@ -43,7 +51,7 @@ A skill deve disparar quando o usuário disser coisas como:
 - **Nunca** compilar com flags além de `-encoding UTF-8` e `-cp`. Sem `-source/-target`
   customizado — deixar o `javac` do ambiente decidir (padrão do JDK do dev).
 - **Nunca** subir JAR pro cliente sem o dev confirmar o ambiente.
-- JARs em `dist/` sempre com timestamp `YYYYMMDD-HHMMSS` pra rastreio.
+- JARs em `dist/` sempre com timestamp `YYYYMMDD-HHMMSS-<hash8>` pra rastreio.
 - Se `aplicacao: produção`, pedir confirmação verbal explícita antes do build.
 
 ## Dependências
