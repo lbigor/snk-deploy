@@ -65,15 +65,31 @@ if [ -z "$raw_paths" ]; then
   exit 1
 fi
 
-# Diretórios de busca em ordem de prioridade.
+# Diretórios de busca — SEM hardcoded. Fontes em ordem de prioridade:
+#   1. Env var $SANKHYA_LIBS (uma ou múltiplos dirs separados por ':')
+#   2. Arquivo .snk-deploy.paths na raiz do projeto (1 dir por linha, # comenta)
+# Se nada for configurado e o JAR não estiver no path literal, aborta com
+# mensagem clara pedindo pra criar o arquivo ou exportar a env.
 FALLBACK_DIRS=()
-[ -n "${SANKHYA_LIBS:-}" ] && FALLBACK_DIRS+=("$SANKHYA_LIBS")
-FALLBACK_DIRS+=(
-  "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Jar"
-  "$HOME/Library/Mobile Documents/com~apple~CloudDocs/DevStudios/Java/Libs/Sankhya"
-  "$HOME/Documents/Sankhya-libs"
-  "$HOME/Documents/Java"
-)
+
+if [ -n "${SANKHYA_LIBS:-}" ]; then
+  # Aceita múltiplos dirs separados por ':'
+  while IFS= read -r d; do
+    [ -n "$d" ] && FALLBACK_DIRS+=("$d")
+  done < <(echo "$SANKHYA_LIBS" | tr ':' '\n')
+fi
+
+if [ -f .snk-deploy.paths ]; then
+  while IFS= read -r line; do
+    # Ignora comentários e linhas vazias
+    line="${line%%#*}"
+    line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [ -z "$line" ] && continue
+    # Expande ~ e variáveis ambiente
+    expanded="$(eval echo "$line")"
+    FALLBACK_DIRS+=("$expanded")
+  done < .snk-deploy.paths
+fi
 
 resolve_jar() {
   local original="$1"
