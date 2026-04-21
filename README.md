@@ -19,8 +19,10 @@ Pré-requisitos:
 
 - `javac` e `jar` no PATH (JDK 8+).
 - Projeto Sankhya Java com `.classpath` (Eclipse) e pacote `br.com.lbi`.
-- JARs da IBL em path absoluto no `.classpath` (padrão
-  `~/Library/Mobile Documents/com~apple~CloudDocs/DevStudios/Java/Libs/Sankhya/`).
+- JARs do Sankhya referenciados no `.classpath` do projeto. O `build.sh` lê
+  o caminho deles diretamente do `.classpath` — não há path hardcoded na skill.
+  Defina a variável de ambiente `SANKHYA_LIBS` apontando pro diretório dos JARs
+  do seu ambiente caso queira sobrescrever.
 
 ## Como funciona
 

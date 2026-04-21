@@ -77,7 +77,7 @@ Se a versão anterior sumiu do histórico:
 - **Versionamento**: JARs em `dist/` com timestamp `YYYYMMDD-HHMMSS` facilitam
   responder "o que estava rodando ontem às 14h?".
 - **Incidente**: se algo quebrar, [snk-doctor](https://github.com/lbigor/snk-doctor)
-  diagnostica pelo Slack (canal `#logsankhya`, team T0ARZ7A7TTN).
+  diagnostica pelo canal Slack configurado no seu ambiente (via `snk-slack`).
 - **Cache do browser**: se o botão customizado sumir depois de ativar, o usuário
   pode precisar fazer Ctrl+Shift+R pra limpar cache do Sankhya W.
 - **Classe duplicada**: erro comum — mesma classe em dois JARs ativos. Desative o
