@@ -53,26 +53,87 @@ TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 DIST="dist"
 mkdir -p "$DIST" target/classes
 
-# Montar classpath a partir do .classpath (Eclipse) — JARs absolutos.
-CLASSPATH=$(grep -oE 'path="[^"]+\.jar"' .classpath 2>/dev/null \
-  | sed 's/path="//;s/"$//' \
-  | tr '\n' ':' \
-  | sed 's/:$//')
+# Montar classpath a partir do .classpath (Eclipse).
+# Cada JAR: tenta o path original; se não existir, busca o mesmo basename em
+# diretórios fallback (SANKHYA_LIBS, iCloud/Jar, ~/Documents/Sankhya-libs, etc).
+raw_paths=$(grep -oE 'path="[^"]+\.jar"' .classpath 2>/dev/null \
+  | sed 's/path="//;s/"$//')
 
-if [ -z "$CLASSPATH" ]; then
+if [ -z "$raw_paths" ]; then
   echo "[FAIL] .classpath não contém entries JAR (kind=\"lib\")."
   echo "       Verifique se é mesmo projeto Sankhya com deps da IBL."
   exit 1
 fi
 
-# Validar que pelo menos 1 JAR do classpath existe em disco (iCloud pode falhar).
-FIRST_JAR="$(echo "$CLASSPATH" | cut -d: -f1)"
-if [ ! -f "$FIRST_JAR" ]; then
-  echo "[FAIL] JAR referenciado no .classpath não existe em disco:"
-  echo "       $FIRST_JAR"
-  echo "       Cheque o sync do iCloud ou o path absoluto."
+# Diretórios de busca em ordem de prioridade.
+FALLBACK_DIRS=()
+[ -n "${SANKHYA_LIBS:-}" ] && FALLBACK_DIRS+=("$SANKHYA_LIBS")
+FALLBACK_DIRS+=(
+  "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Jar"
+  "$HOME/Library/Mobile Documents/com~apple~CloudDocs/DevStudios/Java/Libs/Sankhya"
+  "$HOME/Documents/Sankhya-libs"
+  "$HOME/Documents/Java"
+)
+
+resolve_jar() {
+  local original="$1"
+  # 1. Se o path literal existe, usa direto.
+  [ -f "$original" ] && { printf '%s' "$original"; return 0; }
+  # 2. Busca por basename nos fallbacks.
+  local base
+  base="$(basename "$original")"
+  local dir
+  for dir in "${FALLBACK_DIRS[@]}"; do
+    if [ -f "$dir/$base" ]; then
+      printf '%s' "$dir/$base"
+      return 0
+    fi
+  done
+  # 3. Placeholder iCloud (arquivo escondido .<nome>.icloud)?
+  for dir in "${FALLBACK_DIRS[@]}"; do
+    if [ -f "$dir/.${base}.icloud" ]; then
+      # Força download via brctl (assíncrono; espera até 30s).
+      brctl download "$dir/$base" 2>/dev/null || true
+      local waited=0
+      while [ ! -f "$dir/$base" ] && [ "$waited" -lt 30 ]; do
+        sleep 1
+        waited=$((waited+1))
+      done
+      if [ -f "$dir/$base" ]; then
+        echo "    ⏬ iCloud baixou $base ($(stat -f%z "$dir/$base") bytes)" >&2
+        printf '%s' "$dir/$base"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+RESOLVED=()
+MISSING=()
+while IFS= read -r original; do
+  [ -z "$original" ] && continue
+  if jar_path=$(resolve_jar "$original"); then
+    RESOLVED+=("$jar_path")
+  else
+    MISSING+=("$(basename "$original")")
+  fi
+done <<< "$raw_paths"
+
+if [ ${#MISSING[@]} -gt 0 ]; then
+  echo "[FAIL] JARs não encontrados em nenhum dir conhecido:"
+  for m in "${MISSING[@]}"; do echo "         - $m"; done
+  echo ""
+  echo "       Dirs pesquisados (em ordem):"
+  for d in "${FALLBACK_DIRS[@]}"; do echo "         - $d"; done
+  echo ""
+  echo "       Defina SANKHYA_LIBS=<caminho> ou copie os JARs pra ~/Documents/Sankhya-libs/"
   exit 1
 fi
+
+# Junta com ':' em uma string classpath.
+CLASSPATH="$(IFS=:; echo "${RESOLVED[*]}")"
+echo "==> classpath resolvido: ${#RESOLVED[@]} JARs"
 
 echo "==> projeto: $NOME"
 echo "==> classpath: $(echo "$CLASSPATH" | tr ':' '\n' | wc -l | tr -d ' ') JARs"
@@ -93,11 +154,41 @@ else
     echo "       Para pular o manifest, exporte SNK_DEPLOY_SKIP_MANIFEST=1."
     exit 1
   fi
+  # Se o projeto não é repo git, auto-init + commit inicial (opt-out via env).
   if [ ! -d .git ] && ! git rev-parse --git-dir >/dev/null 2>&1; then
-    echo "[FAIL] projeto não é repositório git (release tracking obrigatório)."
-    echo "       Rode 'git init' e faça o primeiro commit, ou exporte"
-    echo "       SNK_DEPLOY_SKIP_MANIFEST=1 para pular o manifest."
-    exit 1
+    if [ "${SNK_DEPLOY_NO_AUTO_INIT:-0}" = "1" ]; then
+      echo "[FAIL] projeto não é repositório git e SNK_DEPLOY_NO_AUTO_INIT=1."
+      echo "       Rode 'git init' + commit manual, ou remova a env var."
+      exit 1
+    fi
+
+    echo "==> projeto não é repo git — inicializando automaticamente"
+    git init -q -b main
+    # .gitignore mínimo: nunca versionar dist/, target/, nem IDE.
+    if [ ! -f .gitignore ]; then
+      cat > .gitignore <<'EOF'
+# Gerado por snk-deploy na inicialização automática
+dist/
+target/
+*.class
+*.log
+.DS_Store
+# IDE (preservar .classpath e .project porque a skill depende deles)
+.idea/
+*.iml
+EOF
+    fi
+    git add -A
+    # Committer default caso o global não esteja configurado.
+    if ! git config user.email >/dev/null 2>&1; then
+      git config user.email "snk-deploy@local"
+      git config user.name "snk-deploy auto-init"
+    fi
+    git commit -q -m "Inicializa projeto Sankhya (auto via snk-deploy)
+
+Repo criado automaticamente pelo build.sh pra habilitar release tracking.
+Pra inibir a inicialização automática, exporte SNK_DEPLOY_NO_AUTO_INIT=1."
+    echo "    git init + commit inicial OK"
   fi
 
   BRANCH="$(git branch --show-current 2>/dev/null || echo "")"
