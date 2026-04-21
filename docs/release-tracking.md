@@ -75,7 +75,7 @@ Em cada envio de log pro `#logsankhya`, `snk-slack` lê
 `META-INF/snk-deploy/manifest.json` do classpath e anexa `hash` + link do PR
 ao final da mensagem. Exemplo:
 
-```
+```text
 [FATAL] snk-fabmed-wms NullPointer em TgfEmpenhoEvent.beforeInsert(...)
         build abc12345 · PR #42
 ```
