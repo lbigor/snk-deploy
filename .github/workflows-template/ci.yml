@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Validate skill + scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: chmod +x install.sh test.sh scripts/*.sh
+
+      - name: Run test.sh (structure + bash syntax)
+        run: ./test.sh
+
+      - name: Shellcheck scripts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          shellcheck -e SC2034,SC2155 scripts/*.sh install.sh test.sh
+
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli@0.41.0
+
+      - name: Run markdownlint
+        run: markdownlint '**/*.md' --ignore node_modules
+
+      - name: Check relative links
+        uses: lycheeverse/lychee-action@v1
+        with:
+          args: >-
+            --no-progress
+            --offline
+            --include-fragments
+            './**/*.md'
+          fail: true

@@ -74,13 +74,23 @@ fi
 
 echo ""
 echo "==> .github/"
-for f in .github/CODEOWNERS .github/pull_request_template.md .github/workflows/ci.yml; do
+for f in .github/CODEOWNERS .github/pull_request_template.md; do
   if [ -f "$f" ]; then
     say_ok "$f"
   else
     say_fail "$f ausente"
   fi
 done
+
+# CI workflow pode estar instalado em workflows/ ou pendente em workflows-template/
+# (quando o token GH usado na criação do repo não tem escopo "workflow").
+if [ -f .github/workflows/ci.yml ]; then
+  say_ok ".github/workflows/ci.yml (CI instalado)"
+elif [ -f .github/workflows-template/ci.yml ]; then
+  say_ok ".github/workflows-template/ci.yml (template pendente de instalação)"
+else
+  say_fail "ci.yml ausente (nem em workflows/ nem em workflows-template/)"
+fi
 
 echo ""
 echo "==> resumo: $ok ok, $fail fail"
