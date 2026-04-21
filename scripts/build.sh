@@ -179,6 +179,34 @@ else
     fi
 
     echo "==> projeto não é repo git — inicializando automaticamente"
+
+    # ---- SECURITY GATE: escaneia secrets antes de QUALQUER commit ----
+    # Aborta se detectar webhook Slack, PAT GitHub, chave OpenAI, bot token
+    # Slack, ou qualquer padrão óbvio de secret embutido no código.
+    SECRET_PATTERNS='hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+|ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}|ghs_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{30,}|xoxb-[0-9]+-[0-9]+-[A-Za-z0-9]+|xoxp-[0-9]+-[0-9]+-[0-9]+-[A-Za-z0-9]+|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
+    if SECRET_HIT=$(grep -rEn "$SECRET_PATTERNS" \
+        --include="*.java" --include="*.js" --include="*.ts" \
+        --include="*.py" --include="*.properties" --include="*.yml" \
+        --include="*.yaml" --include="*.xml" --include="*.json" \
+        . 2>/dev/null | head -3); then
+      if [ -n "$SECRET_HIT" ]; then
+        echo ""
+        echo "[ABORT] 🚨 Secret detectado no código — NÃO vou fazer commit automático."
+        echo ""
+        echo "Locais suspeitos:"
+        echo "$SECRET_HIT" | sed 's|^|  |' | cut -c1-120
+        echo ""
+        echo "Webhook/token/chave NÃO pode ir pra git. Ações:"
+        echo "  1. Remova o valor hardcoded (use preferência Sankhya ou env var)"
+        echo "  2. Se já vazou pra lugar nenhum, apenas substitua no código"
+        echo "  3. Se já foi commitado em outro lugar, revogue o secret AGORA"
+        echo "  4. Rode build.sh de novo"
+        echo ""
+        exit 1
+      fi
+    fi
+    echo "    security gate: nenhum secret detectado"
+
     git init -q -b main
     # .gitignore mínimo: nunca versionar dist/, target/, nem IDE.
     if [ ! -f .gitignore ]; then
@@ -192,6 +220,12 @@ target/
 # IDE (preservar .classpath e .project porque a skill depende deles)
 .idea/
 *.iml
+# Secrets — nunca commitar
+*.token
+*.secret
+.env
+.env.local
+.sankhya-slack-webhook
 EOF
     fi
     git add -A
