@@ -205,9 +205,10 @@ javac -encoding UTF-8 -cp "$CLASSPATH" -d target/classes @target/sources.txt
 
 # Copiar resources (se houver) — tudo que não é .java em src/.
 if [ -d src ]; then
+  # shellcheck disable=SC2016
   (cd src && find . -type f ! -name "*.java" -print0 2>/dev/null \
-    | xargs -0 -I{} sh -c 'mkdir -p "../target/classes/$(dirname "{}")" && cp "{}" "../target/classes/{}"' \
-    || true)
+    | xargs -0 -I{} sh -c 'mkdir -p "../target/classes/$(dirname "$1")" && cp "$1" "../target/classes/$1"' _ {} ) \
+    || true
 fi
 
 # ----------------------------------------------------------------------------

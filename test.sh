@@ -144,7 +144,7 @@ JAVA
   fi
 
   # Encontrar JAR gerado.
-  JAR="$(ls "$FAKEPROJ"/dist/*.jar 2>/dev/null | head -n1 || echo "")"
+  JAR="$(find "$FAKEPROJ/dist" -maxdepth 1 -name '*.jar' 2>/dev/null | head -n1 || echo "")"
   if [ -n "$JAR" ] && [ -f "$JAR" ]; then
     say_ok "JAR gerado em dist/"
 
@@ -197,7 +197,7 @@ JAVA
   # Teste retrocompatibilidade: SNK_DEPLOY_SKIP_MANIFEST=1 remove manifest.
   rm -rf "$FAKEPROJ/dist" "$FAKEPROJ/target"
   if SNK_DEPLOY_SKIP_MANIFEST=1 bash "$ROOT/scripts/build.sh" "$FAKEPROJ" >"$TMP/build2.log" 2>&1; then
-    JAR2="$(ls "$FAKEPROJ"/dist/*.jar 2>/dev/null | head -n1 || echo "")"
+    JAR2="$(find "$FAKEPROJ/dist" -maxdepth 1 -name '*.jar' 2>/dev/null | head -n1 || echo "")"
     if [ -n "$JAR2" ] && [ -f "$JAR2" ]; then
       if unzip -p "$JAR2" META-INF/snk-deploy/manifest.json >/dev/null 2>&1; then
         say_fail "SNK_DEPLOY_SKIP_MANIFEST=1 mas manifest ainda embutido"
