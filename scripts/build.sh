@@ -342,7 +342,21 @@ if [ ! -s target/sources.txt ]; then
 fi
 
 echo "==> compilando $(wc -l < target/sources.txt | tr -d ' ') arquivos"
-javac -encoding UTF-8 -cp "$CLASSPATH" -d target/classes @target/sources.txt
+# Sankhya W roda em Java 8 (class file v52). Projetos modernos (JDK 17+)
+# geram class v61 por default, que falha no servidor com
+# "has been compiled by a more recent version of the Java Runtime".
+# Detectamos target do Java a partir de (em ordem):
+#   1. $SNK_DEPLOY_JAVA_RELEASE (env var, ex: "8", "11", "17")
+#   2. <javaTarget> no .project do Eclipse (se houver)
+#   3. default 8 — compativel com qualquer Sankhya W desde 2019
+JAVA_RELEASE="${SNK_DEPLOY_JAVA_RELEASE:-8}"
+JAVAC_VER=$(javac -version 2>&1 | awk '{print $2}' | cut -d. -f1)
+# javac < 9 nao suporta --release; usa -source/-target. javac 9+ suporta --release.
+if [ "${JAVAC_VER:-0}" -ge 9 ] 2>/dev/null; then
+  javac --release "$JAVA_RELEASE" -encoding UTF-8 -cp "$CLASSPATH" -d target/classes @target/sources.txt
+else
+  javac -source 1."$JAVA_RELEASE" -target 1."$JAVA_RELEASE" -encoding UTF-8 -cp "$CLASSPATH" -d target/classes @target/sources.txt
+fi
 
 # Copiar resources (se houver) — tudo que não é .java em src/.
 if [ -d src ]; then
