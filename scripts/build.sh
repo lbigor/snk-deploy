@@ -11,9 +11,13 @@
 #   SNK_DEPLOY_CREATE_RELEASE=1     # equivalente a --release
 #   SNK_DEPLOY_SKIP_MANIFEST=1      # não embute META-INF/snk-deploy/manifest.json
 #                                   # (retrocompatibilidade com JAR antigo)
+#   SNK_DEPLOY_OUTPUT_DIR=<dir>     # diretório customizado pra salvar o JAR.
+#                                   # Default: ~/Documents/deploy/<projeto>
+#                                   # Use "." pra voltar ao comportamento antigo
+#                                   # (<projeto>/dist).
 #
 # Saída:
-#   <projeto>/dist/<nome>-YYYYMMDD-HHMMSS-<hash8>.jar
+#   ~/Documents/deploy/<projeto>/<nome>-YYYYMMDD-HHMMSS-<hash8>.jar  (default)
 #   com META-INF/snk-deploy/manifest.json embutido (salvo se SKIP_MANIFEST).
 #
 # Pré-requisitos:
@@ -50,13 +54,20 @@ fi
 
 NOME="$(basename "$(pwd)")"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-DIST="dist"
+# Diretório de saída: default ~/Documents/deploy/<projeto>; SNK_DEPLOY_OUTPUT_DIR=. volta pra <projeto>/dist.
+if [ "${SNK_DEPLOY_OUTPUT_DIR:-}" = "." ]; then
+  DIST="dist"
+elif [ -n "${SNK_DEPLOY_OUTPUT_DIR:-}" ]; then
+  DIST="$(eval echo "$SNK_DEPLOY_OUTPUT_DIR")/$NOME"
+else
+  DIST="$HOME/Documents/deploy/$NOME"
+fi
 mkdir -p "$DIST" target/classes
 
 # Montar classpath a partir do .classpath (Eclipse).
 # Cada JAR: tenta o path original; se não existir, busca o mesmo basename em
 # diretórios fallback (SANKHYA_LIBS, iCloud/Jar, ~/Documents/Sankhya-libs, etc).
-raw_paths=$(grep -oE 'path="[^"]+\.jar"' .classpath 2>/dev/null \
+raw_paths=$(grep -oEi 'path="[^"]+\.jar"' .classpath 2>/dev/null \
   | sed 's/path="//;s/"$//')
 
 if [ -z "$raw_paths" ]; then
@@ -99,14 +110,14 @@ resolve_jar() {
   local base
   base="$(basename "$original")"
   local dir
-  for dir in "${FALLBACK_DIRS[@]}"; do
+  for dir in "${FALLBACK_DIRS[@]+"${FALLBACK_DIRS[@]}"}"; do
     if [ -f "$dir/$base" ]; then
       printf '%s' "$dir/$base"
       return 0
     fi
   done
   # 3. Placeholder iCloud (arquivo escondido .<nome>.icloud)?
-  for dir in "${FALLBACK_DIRS[@]}"; do
+  for dir in "${FALLBACK_DIRS[@]+"${FALLBACK_DIRS[@]}"}"; do
     if [ -f "$dir/.${base}.icloud" ]; then
       # Força download via brctl (assíncrono; espera até 30s).
       brctl download "$dir/$base" 2>/dev/null || true
@@ -141,7 +152,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   for m in "${MISSING[@]}"; do echo "         - $m"; done
   echo ""
   echo "       Dirs pesquisados (em ordem):"
-  for d in "${FALLBACK_DIRS[@]}"; do echo "         - $d"; done
+  for d in "${FALLBACK_DIRS[@]+"${FALLBACK_DIRS[@]}"}"; do echo "         - $d"; done
   echo ""
   echo "       Defina SANKHYA_LIBS=<caminho> ou copie os JARs pra ~/Documents/Sankhya-libs/"
   exit 1
@@ -150,6 +161,35 @@ fi
 # Junta com ':' em uma string classpath.
 CLASSPATH="$(IFS=:; echo "${RESOLVED[*]}")"
 echo "==> classpath resolvido: ${#RESOLVED[@]} JARs"
+
+# Resolver dependências de projeto Eclipse (kind="src") — adiciona output do projeto irmão.
+# Tenta IntelliJ (out/production/<proj>) primeiro, depois Eclipse (bin/), depois target/classes.
+PROJ_PARENT="$(dirname "$(pwd)")"
+while IFS= read -r sp; do
+  [ -z "$sp" ] && continue
+  sp="${sp#/}"  # workspace-relative: remove barra inicial
+  proj_root="$PROJ_PARENT/$sp"
+  resolved=""
+  for cand in "$proj_root/out/production/$sp" "$proj_root/target/classes" "$proj_root/bin"; do
+    if [ -d "$cand" ]; then
+      # Confirma que tem .class real (não 0-byte stub).
+      first_class=$(find "$cand" -name "*.class" -not -empty 2>/dev/null | head -1)
+      if [ -n "$first_class" ]; then
+        resolved="$cand"
+        break
+      fi
+    fi
+  done
+  if [ -n "$resolved" ]; then
+    CLASSPATH="$CLASSPATH:$resolved"
+    echo "    [src-ref] $sp → ${resolved#$PROJ_PARENT/}"
+  else
+    echo "    [src-ref] aviso: nenhum output válido (out/production, target/classes, bin) em $sp — ignorado"
+  fi
+done < <(grep -oE 'kind="src"[^>]*/>' .classpath \
+  | grep -v 'path="src"' \
+  | grep -oE 'path="[^"]+"' \
+  | sed 's/path="//;s/"$//')
 
 echo "==> projeto: $NOME"
 echo "==> classpath: $(echo "$CLASSPATH" | tr ':' '\n' | wc -l | tr -d ' ') JARs"
@@ -358,10 +398,16 @@ else
   javac -source 1."$JAVA_RELEASE" -target 1."$JAVA_RELEASE" -encoding UTF-8 -cp "$CLASSPATH" -d target/classes @target/sources.txt
 fi
 
-# Copiar resources (se houver) — tudo que não é .java em src/.
+# Copiar resources (se houver) — tudo que não é .java NEM .class em src/.
+# IMPORTANTE: .class tem que ser excluido — se a IDE deixar .class em src/,
+# o cp sobrescreve os .class recem-compilados no target/classes com versoes
+# antigas (stale). Bug incidente 2026-04-22 em snk-fabmed-empenho-automatico:
+# NoSuchMethodError em Estoque.<init> com 5 args (construtor existia no .java
+# mas o .class stale no src/ nao tinha). Mesmo com *.class no .gitignore, a
+# IDE gera .class localmente ao abrir o projeto.
 if [ -d src ]; then
   # shellcheck disable=SC2016
-  (cd src && find . -type f ! -name "*.java" -print0 2>/dev/null \
+  (cd src && find . -type f ! -name "*.java" ! -name "*.class" -print0 2>/dev/null \
     | xargs -0 -I{} sh -c 'mkdir -p "../target/classes/$(dirname "$1")" && cp "$1" "../target/classes/$1"' _ {} ) \
     || true
 fi
