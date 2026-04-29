@@ -2,12 +2,15 @@
 # build.sh — compila projeto Sankhya Java e empacota em JAR com timestamp + hash git.
 #
 # Uso:
-#   ./build.sh                      # compila projeto no cwd
+#   ./build.sh                      # compila projeto no cwd (env=prod default)
 #   ./build.sh /caminho/do/projeto  # compila projeto em outro lugar
+#   ./build.sh --env homol          # marca JAR como build de homologação (logs full)
+#   ./build.sh --env prod           # marca como produção (default — só erro vai pro Slack)
 #   ./build.sh --release            # compila + cria GitHub Release (precisa de gh auth)
-#   ./build.sh /path --release      # idem, em outro diretório
+#   ./build.sh /path --env prod --release  # combinável em qualquer ordem
 #
 # Env vars:
+#   SNK_DEPLOY_ENV=prod|homol       # equivalente a --env (default: prod)
 #   SNK_DEPLOY_CREATE_RELEASE=1     # equivalente a --release
 #   SNK_DEPLOY_SKIP_MANIFEST=1      # não embute META-INF/snk-deploy/manifest.json
 #                                   # (retrocompatibilidade com JAR antigo)
@@ -15,6 +18,13 @@
 #                                   # Default: ~/Documents/deploy/<projeto>
 #                                   # Use "." pra voltar ao comportamento antigo
 #                                   # (<projeto>/dist).
+#
+# Modo de log Slack (REGRA OBRIGATÓRIA):
+#   O env do build é embutido em manifest.json como campo `env`. A lib
+#   br.com.lbi.slack.SlackLogger lê via DeployManifest.getEnv() e ajusta o flush:
+#     - env=homol: envia tudo (INICIO/INFO/SUCCESS/FIM/FATAL).
+#     - env=prod (default): só envia se buffer contém ao menos 1 entry de severity ERROR.
+#   Decisão é do operador no momento do deploy, não em runtime via pref Sankhya.
 #
 # Saída:
 #   ~/Documents/deploy/<projeto>/<nome>-YYYYMMDD-HHMMSS-<hash8>.jar  (default)
@@ -29,15 +39,30 @@
 
 set -euo pipefail
 
-# Parse argumentos — aceita [dir] [--release] em qualquer ordem.
+# Parse argumentos — aceita [dir] [--release] [--env prod|homol] em qualquer ordem.
 PROJETO_DIR="."
 CREATE_RELEASE="${SNK_DEPLOY_CREATE_RELEASE:-0}"
+DEPLOY_ENV="${SNK_DEPLOY_ENV:-prod}"
+EXPECT_ENV_VALUE=0
 for arg in "$@"; do
+  if [ "$EXPECT_ENV_VALUE" = "1" ]; then
+    DEPLOY_ENV="$arg"
+    EXPECT_ENV_VALUE=0
+    continue
+  fi
   case "$arg" in
     --release) CREATE_RELEASE=1 ;;
+    --env) EXPECT_ENV_VALUE=1 ;;
     *) PROJETO_DIR="$arg" ;;
   esac
 done
+
+# Normaliza + valida env.
+DEPLOY_ENV="$(echo "$DEPLOY_ENV" | tr '[:upper:]' '[:lower:]')"
+case "$DEPLOY_ENV" in
+  prod|homol) ;;
+  *) echo "[FAIL] --env deve ser 'prod' ou 'homol' (recebido: $DEPLOY_ENV)"; exit 1 ;;
+esac
 
 cd "$PROJETO_DIR"
 
@@ -330,11 +355,13 @@ Pra inibir a inicialização automática, exporte SNK_DEPLOY_NO_AUTO_INIT=1."
       --arg commit_short "$COMMIT_SHORT" \
       --arg author "$AUTHOR" \
       --arg committed_at "$COMMITTED_AT" \
+      --arg env "$DEPLOY_ENV" \
       --argjson pr "$PR_JSON" \
       '{
         schema_version: 1,
         hash: $hash,
         project: $project,
+        env: $env,
         built_at: $built_at,
         git: {
           branch: $branch,
@@ -354,6 +381,7 @@ Pra inibir a inicialização automática, exporte SNK_DEPLOY_NO_AUTO_INIT=1."
       printf '  "schema_version": 1,\n'
       printf '  "hash": "%s",\n' "$(json_esc "$HASH8")"
       printf '  "project": "%s",\n' "$(json_esc "$NOME")"
+      printf '  "env": "%s",\n' "$(json_esc "$DEPLOY_ENV")"
       printf '  "built_at": "%s",\n' "$(json_esc "$BUILT_AT")"
       printf '  "git": {\n'
       printf '    "branch": "%s",\n' "$(json_esc "$BRANCH")"
@@ -369,7 +397,12 @@ Pra inibir a inicialização automática, exporte SNK_DEPLOY_NO_AUTO_INIT=1."
     } > "$MANIFEST_DIR/manifest.json"
   fi
 
-  echo "==> manifest: $MANIFEST_DIR/manifest.json (hash=$HASH8)"
+  echo "==> manifest: $MANIFEST_DIR/manifest.json (hash=$HASH8, env=$DEPLOY_ENV)"
+  if [ "$DEPLOY_ENV" = "prod" ]; then
+    echo "    [LOG] modo PROD: lib SlackLogger só envia ao Slack quando houver erro."
+  else
+    echo "    [LOG] modo HOMOL: lib SlackLogger envia tudo (INICIO/INFO/SUCCESS/FIM/FATAL)."
+  fi
 fi
 
 # ----------------------------------------------------------------------------

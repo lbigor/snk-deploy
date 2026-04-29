@@ -26,13 +26,47 @@ A skill deve disparar quando o usuário disser coisas como:
    - Homologação: segue direto.
    - Produção: pede confirmação extra ("Confirma deploy em PRODUÇÃO do cliente X?")
      antes de gerar o JAR.
-3. **Compilar e empacotar.** Rodar `scripts/build.sh` no diretório do projeto.
+   - **A resposta determina o modo de log Slack do JAR** (ver passo 3.6). É decidido
+     **agora**, não em runtime via preferência Sankhya — o ambiente fica baked no
+     manifest do JAR.
+3. **Compilar e empacotar.** Rodar `scripts/build.sh` no diretório do projeto, passando
+   `--env prod` ou `--env homol` conforme resposta do passo 2.
    - Gera `dist/<nome>-<timestamp>-<hash8>.jar`.
    - Se `javac` falhar, parar e mostrar erros. Nunca subir JAR incompleto.
 3.5. **Release tracking.** Ao compilar, a skill embute `META-INF/snk-deploy/manifest.json`
-     dentro do JAR com: branch, commit, PR associado (via `gh`), autor, timestamp, hash curto.
+     dentro do JAR com: branch, commit, PR associado (via `gh`), autor, timestamp, hash curto,
+     **e o ambiente do build (`env: "prod" | "homol"`)**.
      Este manifest é lido automaticamente por `snk-slack` em runtime e anexado aos logs,
      permitindo que `snk-doctor` rastreie qualquer erro de volta ao PR que o causou.
+
+3.6. **Modo de log por ambiente (REGRA OBRIGATÓRIA).** A lib `br.com.lbi.slack.SlackLogger`
+     consulta `DeployManifest.getEnv()` e ajusta o flush automaticamente:
+
+     | Manifest `env` | Comportamento `flush()` |
+     |---|---|
+     | `homol` | envia tudo: `[INICIO]`, `[INFO]`, `[DEBUG]`, `[SUCCESS]`, `[FIM]`, `[FATAL]` |
+     | `prod` (default) | só envia se buffer contém pelo menos 1 entry de severity ERROR |
+     | ausente / null | mesmo que `prod` (conservador) |
+
+     O caller **nunca** decide modo via preferência Sankhya. O caller usa o padrão limpo:
+     ```java
+     SlackLogger slack = SlackLogger.create(null).modulo(...).header(...).build();
+     try {
+         slack.info("INICIO", "===");
+         // ... trabalho ...
+         slack.success("FIM", "===");
+         slack.flush();  // em prod, descarta buffer se sem ERROR; em homol, envia tudo
+     } catch (Exception e) {
+         slack.error("FATAL", "...", e);
+         slack.flush();  // sempre envia (tem ERROR no buffer)
+         throw e;
+     }
+     ```
+
+     **Por que assim e não via pref Sankhya:** ambiente é propriedade do build, não de
+     runtime. Mesmo JAR rodando em prod e homol seria errado — quem decidiu o destino
+     do build foi o operador no momento do deploy. Embed no manifest = imutável,
+     auditável, sem risco de pref errada flooding canal de produção.
      Se o repo tiver permissão `gh release create`, um release é criado automaticamente
      com o JAR como asset (opcional — controle via env `SNK_DEPLOY_CREATE_RELEASE=1` ou
      flag `--release` no build.sh). Detalhes em
